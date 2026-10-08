@@ -1,0 +1,27 @@
+# Reference systemd unit for forge-monitor.
+#
+# The daemon does NOT install this itself — Forge provisioning drops the unit
+# and fills in the real paths. It is kept here as documentation of the expected
+# unit, in particular Type=notify + WatchdogSec, which enable the daemon's
+# systemd watchdog (a hung daemon that stops pinging is killed and restarted).
+# If the unit is not Type=notify the daemon still runs; the watchdog pings are
+# simply a no-op.
+
+[Unit]
+Description=Laravel Forge Monitor
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=notify
+NotifyAccess=main
+WatchdogSec=180
+ExecStart=/usr/local/bin/forge-monitor --database /home/forge/.forge/database.sqlite
+Restart=always
+RestartSec=5
+User=forge
+
+[Install]
+WantedBy=multi-user.target

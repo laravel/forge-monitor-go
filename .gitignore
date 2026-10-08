@@ -1,0 +1,6 @@
+/dist/
+/forge-monitor
+*.sqlite
+*.sqlite-journal
+*.db
+.DS_Store

@@ -1,0 +1,90 @@
+name: Build and release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l cmd internal)"
+
+      - name: Vet
+        run: make vet
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Build Linux binaries and checksums
+        run: make dist
+
+      - name: Verify checksums and binary startup
+        working-directory: dist
+        run: |
+          sha256sum --check checksums.txt
+          ./forge-monitor-linux-amd64 --help
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: forge-monitor-linux
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: forge-monitor-linux
+          path: dist
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Expected a version tag such as v1.0.0 or v1.0.0-rc.1"
+            exit 1
+          fi
+
+          cd dist
+          sha256sum --check checksums.txt
+          chmod +x forge-monitor-linux-amd64 forge-monitor-linux-arm64
+
+          release_flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            forge-monitor-linux-amd64 forge-monitor-linux-arm64 checksums.txt \
+            --verify-tag --draft --title "$RELEASE_TAG" --generate-notes \
+            "${release_flags[@]}"
+          gh release edit "$RELEASE_TAG" --draft=false
